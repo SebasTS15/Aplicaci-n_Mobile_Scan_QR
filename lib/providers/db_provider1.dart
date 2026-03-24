@@ -1,0 +1,147 @@
+import 'dart:io';
+import 'package:path/path.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart';
+
+import 'package:qr_reader/models/scan_model.dart';
+export 'package:qr_reader/models/scan_model.dart';
+
+class DBProvider1 {
+  static late Database _database;
+  static final DBProvider1 db = DBProvider1._();
+  DBProvider1._();
+
+  Future<Database> get database async {
+    // Si ya existe, no volver a abrir
+    // if (_database != null) return _database;
+
+    // Obtener la ruta de la base de datos local
+    var databasesPath = await getDatabasesPath();
+    String path = join(databasesPath, 'ScansDB.db');
+
+    print('Ruta BD: $path');
+
+    _database = await open(path);
+    return _database;
+  }
+
+  Future open(String path) async {
+    return await openDatabase(
+      path,
+      version: 2, // <<-- Si cambias la estructura, sube este número
+      onOpen: (db) {},
+      onCreate: (Database db, int version) async {
+        // Crear tabla de scans
+        await db.execute('''
+          CREATE TABLE Scans(
+            id INTEGER PRIMARY KEY,
+            tipo TEXT,
+            valor TEXT
+          )
+        ''');
+
+        // Crear tabla de usuarios
+        await db.execute('''
+          CREATE TABLE Usuarios(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            correo TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+          )
+        ''');
+      },
+
+      // Este bloque se ejecuta automáticamente si subes la versión (version++)
+      onUpgrade: (Database db, int oldVersion, int newVersion) async {
+        print('Actualizando BD de versión $oldVersion a $newVersion');
+
+        if (oldVersion < 2) {
+          // Si la base era versión 1, agrega la nueva tabla de usuarios
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS Usuarios(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              nombre TEXT NOT NULL,
+              correo TEXT UNIQUE NOT NULL,
+              password TEXT NOT NULL
+            )
+          ''');
+        }
+
+        // Ejemplo para futuras versiones:
+        /*
+        if (oldVersion < 3) {
+          await db.execute('ALTER TABLE Usuarios ADD COLUMN edad INTEGER');
+        }
+        */
+      },
+    );
+  }
+
+  // ------------------------
+  // CRUD para Scans
+  // ------------------------
+
+  Future<int> nuevoScanRaw(ScanModel nuevoScan) async {
+    final id = nuevoScan.id;
+    final tipo = nuevoScan.tipo;
+    final valor = nuevoScan.valor;
+
+    final db = await database;
+
+    final res = await db.rawInsert('''
+      INSERT INTO Scans( id, tipo, valor )
+        VALUES( $id, '$tipo', '$valor' )
+    ''');
+
+    return res;
+  }
+
+  Future<int> nuevoScan(ScanModel nuevoScan) async {
+    final db = await database;
+    final res = await db.insert('Scans', nuevoScan.toJson());
+    return res;
+  }
+
+  Future<int> updateScan(ScanModel nuevoScan) async {
+    final db = await database;
+    final res = await db.update(
+      'Scans',
+      nuevoScan.toJson(),
+      where: 'id = ?',
+      whereArgs: [nuevoScan.id],
+    );
+    return res;
+  }
+
+  Future<int> deleteScan(int id) async {
+    final db = await database;
+    final res = await db.delete('Scans', where: 'id = ?', whereArgs: [id]);
+    return res;
+  }
+
+  Future<int> deleteAllScans() async {
+    final db = await database;
+    final res = await db.rawDelete('DELETE FROM Scans');
+    return res;
+  }
+
+  Future<ScanModel?> getScanById(int id) async {
+    final db = await database;
+    final res = await db.query('Scans', where: 'id = ?', whereArgs: [id]);
+    return res.isNotEmpty ? ScanModel.fromJson(res.first) : null;
+  }
+
+  Future<List<ScanModel>> getTodosLosScans() async {
+    final db = await database;
+    final res = await db.query('Scans');
+    return res.isNotEmpty ? res.map((s) => ScanModel.fromJson(s)).toList() : [];
+  }
+
+  Future<List<ScanModel>> getScansPorTipo(String tipo) async {
+    final db = await database;
+    final res = await db.rawQuery('SELECT * FROM Scans WHERE tipo = ?', [tipo]);
+    return res.isNotEmpty ? res.map((s) => ScanModel.fromJson(s)).toList() : [];
+  }
+
+  Future close() async => _database.close();
+}
